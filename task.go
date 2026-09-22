@@ -137,6 +137,7 @@ type SnerdTask struct {
 	CronExpr            *string   `json:"cronExpression,omitempty"`
 	WebhookUrl          *string   `json:"webhookUrl,omitempty"`
 	MaxExecutionSeconds *int      `json:"maxExecutionSeconds,omitempty"`
+	Pool                *string   `json:"pool,omitempty"`
 
 	// Timestamps for record-keeping
 	CreatedAt time.Time  `json:"-"`                   // When the task was created
@@ -152,7 +153,7 @@ func NewSnerdTask(
 	maxRetries int,
 	retryAfterHours float64,
 ) (*SnerdTask, error) {
-	return NewSnerdTaskAdvanced(taskID, taskType, parameters, maxRetries, retryAfterHours, nil, nil, nil, nil, nil, nil, nil, nil)
+	return NewSnerdTaskAdvanced(taskID, taskType, parameters, maxRetries, retryAfterHours, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 // NewSnerdTaskAdvanced creates a new task with advanced parameters
@@ -170,6 +171,7 @@ func NewSnerdTaskAdvanced(
 	cronOpt *string,
 	webhookUrl *string,
 	maxExecutionSeconds *int,
+	pool *string,
 ) (*SnerdTask, error) {
 	paramJSON, err := json.Marshal(parameters)
 	if err != nil {
@@ -219,6 +221,7 @@ func NewSnerdTaskAdvanced(
 		CronExpr:            parsedCron,
 		WebhookUrl:          webhookUrl,
 		MaxExecutionSeconds: maxExecutionSeconds,
+		Pool:                pool,
 		CreatedAt:           time.Now(),
 		UpdatedAt:           time.Now(),
 	}
@@ -376,6 +379,7 @@ func (t *SnerdTask) ToRetryableTask() *RetryableTask {
 		CronExpr:            t.CronExpr,
 		WebhookUrl:          t.WebhookUrl,
 		MaxExecutionSeconds: t.MaxExecutionSeconds,
+		Pool:                t.Pool,
 		EmbeddedTask:        t,
 		DeletedAt:           t.DeletedAt,
 		CreatedAt:           t.CreatedAt,
@@ -411,6 +415,7 @@ func FromRetryableTask(rt *RetryableTask) *SnerdTask {
 		CronExpr:            rt.CronExpr,
 		WebhookUrl:          rt.WebhookUrl,
 		MaxExecutionSeconds: rt.MaxExecutionSeconds,
+		Pool:                rt.Pool,
 		CreatedAt:           rt.CreatedAt,
 		UpdatedAt:           rt.UpdatedAt,
 		DeletedAt:           rt.DeletedAt,

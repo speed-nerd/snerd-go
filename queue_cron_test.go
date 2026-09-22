@@ -38,6 +38,7 @@ func TestCronRescheduling(t *testing.T) {
 		&cronStr,
 		nil, // webhookUrl
 		nil, // maxExecutionSeconds
+		nil, // pool
 	)
 
 	if err != nil {
