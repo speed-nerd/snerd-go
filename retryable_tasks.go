@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -39,6 +40,7 @@ type RetryableTask struct {
 	CronExpr            *string    `json:"cronExpression,omitempty"`
 	WebhookUrl          *string    `json:"webhookUrl,omitempty"`
 	MaxExecutionSeconds *int       `json:"maxExecutionSeconds,omitempty"`
+	Pool                *string    `json:"pool,omitempty"`
 	CreatedAt           time.Time  `json:"-"`
 	UpdatedAt           time.Time  `json:"-"`
 	DeletedAt           *time.Time `json:"deletedAt,omitempty"`
@@ -103,12 +105,13 @@ func (t *RetryableTask) MarshalJSON() ([]byte, error) {
 		RetryAfterTime      time.Time       `json:"retryAfterTime"`
 		TaskData            string          `json:"taskData"`
 		TaskType            string          `json:"taskType"`
-		LastErrorObj        error           `json:"LastErrorObj"`
-		LastJobError        *JobErrorReturn `json:"LastJobError"`
 		ExecuteAt           time.Time       `json:"executeAt"`
 		CronExpr            *string         `json:"cronExpression,omitempty"`
 		WebhookUrl          *string         `json:"webhookUrl,omitempty"`
 		MaxExecutionSeconds *int            `json:"maxExecutionSeconds,omitempty"`
+		Pool                *string         `json:"pool,omitempty"`
+		LastErrorObj        string          `json:"lastErrorObj,omitempty"`
+		LastJobError        *JobErrorReturn `json:"lastJobError,omitempty"`
 		DeletedAt           *time.Time      `json:"deletedAt,omitempty"`
 	}
 
@@ -125,6 +128,11 @@ func (t *RetryableTask) MarshalJSON() ([]byte, error) {
 		}
 	}
 
+	var errStr string
+	if t.LastErrorObj != nil {
+		errStr = t.LastErrorObj.Error()
+	}
+
 	alias := Alias{
 		TaskID:              t.TaskID,
 		RetryCount:          t.RetryCount,
@@ -133,12 +141,13 @@ func (t *RetryableTask) MarshalJSON() ([]byte, error) {
 		RetryAfterTime:      t.RetryAfterTime,
 		TaskData:            t.TaskData,
 		TaskType:            t.TaskType,
-		LastErrorObj:        t.LastErrorObj,
-		LastJobError:        t.LastJobError,
 		ExecuteAt:           t.ExecuteAt,
 		CronExpr:            t.CronExpr,
 		WebhookUrl:          t.WebhookUrl,
 		MaxExecutionSeconds: t.MaxExecutionSeconds,
+		Pool:                t.Pool,
+		LastErrorObj:        errStr,
+		LastJobError:        t.LastJobError,
 		DeletedAt:           t.DeletedAt,
 	}
 
@@ -158,12 +167,13 @@ func (t *RetryableTask) UnmarshalJSON(data []byte) error {
 		RetryAfterTime      time.Time       `json:"retryAfterTime"`
 		TaskData            string          `json:"taskData"`
 		TaskType            string          `json:"taskType"`
-		LastErrorObj        error           `json:"LastErrorObj"`
-		LastJobError        *JobErrorReturn `json:"LastJobError"`
+		LastErrorObj        string          `json:"lastErrorObj,omitempty"`
+		LastJobError        *JobErrorReturn `json:"lastJobError,omitempty"`
 		ExecuteAt           time.Time       `json:"executeAt"`
 		CronExpr            *string         `json:"cronExpression,omitempty"`
 		WebhookUrl          *string         `json:"webhookUrl,omitempty"`
 		MaxExecutionSeconds *int            `json:"maxExecutionSeconds,omitempty"`
+		Pool                *string         `json:"pool,omitempty"`
 		DeletedAt           *time.Time      `json:"deletedAt,omitempty"`
 	}
 
@@ -181,12 +191,15 @@ func (t *RetryableTask) UnmarshalJSON(data []byte) error {
 	t.RetryAfterTime = alias.RetryAfterTime
 	t.TaskData = alias.TaskData
 	t.TaskType = alias.TaskType
-	t.LastErrorObj = alias.LastErrorObj
+	if alias.LastErrorObj != "" {
+		t.LastErrorObj = errors.New(alias.LastErrorObj)
+	}
 	t.LastJobError = alias.LastJobError
 	t.ExecuteAt = alias.ExecuteAt
 	t.CronExpr = alias.CronExpr
 	t.WebhookUrl = alias.WebhookUrl
 	t.MaxExecutionSeconds = alias.MaxExecutionSeconds
+	t.Pool = alias.Pool
 	t.DeletedAt = alias.DeletedAt
 
 	// We'll reconstruct the EmbeddedTask when Execute is called, not here

@@ -52,22 +52,22 @@ func main() {
 
 	// 3) Future-scheduled task → stays "queued"
 	future := time.Now().Add(1 * time.Hour).UTC().Format(time.RFC3339)
-	t3, _ := snerd.NewSnerdTaskAdvanced("future-task-1", "progress-task", map[string]string{}, 1, 0.0, nil, nil, nil, nil, &future, nil, nil, nil)
+	t3, _ := snerd.NewSnerdTaskAdvanced("future-task-1", "progress-task", map[string]string{}, 1, 0.0, nil, nil, nil, nil, &future, nil, nil, nil, nil)
 	q.EnqueueSnerdTask(t3)
 
 	// 4) Cron job — refires every 10 seconds
 	cronExpr := "*/10 * * * * *"
-	t4, _ := snerd.NewSnerdTaskAdvanced("cron-ping-1", "cron-ping", map[string]string{}, 2, 0.0, nil, nil, nil, nil, nil, &cronExpr, nil, nil)
+	t4, _ := snerd.NewSnerdTaskAdvanced("cron-ping-1", "cron-ping", map[string]string{}, 2, 0.0, nil, nil, nil, nil, nil, &cronExpr, nil, nil, nil)
 	q.EnqueueSnerdTask(t4)
 
 	// 5) Webhook job — executed via HTTP POST to the mock webhook server
 	webhookUrl := "http://localhost:9010/webhook-ok"
-	t5, _ := snerd.NewSnerdTaskAdvanced("webhook-task-1", "webhook-task", map[string]string{"via": "webhook"}, 2, 0.0, nil, nil, nil, nil, nil, nil, &webhookUrl, nil)
+	t5, _ := snerd.NewSnerdTaskAdvanced("webhook-task-1", "webhook-task", map[string]string{"via": "webhook"}, 2, 0.0, nil, nil, nil, nil, nil, nil, &webhookUrl, nil, nil)
 	q.EnqueueSnerdTask(t5)
 
 	// 6) Hard-timeout job — handler sleeps 6s but the timeout is 2s
 	timeoutSecs := 2
-	t6, _ := snerd.NewSnerdTaskAdvanced("timeout-task-1", "slow-task", map[string]string{}, 1, 0.0005, nil, nil, nil, nil, nil, nil, nil, &timeoutSecs)
+	t6, _ := snerd.NewSnerdTaskAdvanced("timeout-task-1", "slow-task", map[string]string{}, 1, 0.0005, nil, nil, nil, nil, nil, nil, nil, &timeoutSecs, nil)
 	q.EnqueueSnerdTask(t6)
 
 	fmt.Println("Demo running — dashboard on http://localhost:9022 (Ctrl+C to stop)")

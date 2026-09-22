@@ -54,30 +54,38 @@ func (q *AnyQueue) tasksLogPath() string {
 
 // readDedupedTasks reads the append-only task log and returns the latest
 // line per taskId (cron refires and retries append new lines over time).
-func readDedupedTasks(tasksPath string) map[string]map[string]interface{} {
+func readDedupedTasksMultiple(tasksPaths []string) map[string]map[string]interface{} {
 	tasksMap := make(map[string]map[string]interface{})
-	file, err := os.Open(tasksPath)
-	if err != nil {
-		return tasksMap
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
+	for _, tasksPath := range tasksPaths {
+		file, err := os.Open(tasksPath)
+		if err != nil {
 			continue
 		}
-		var t map[string]interface{}
-		if json.Unmarshal([]byte(line), &t) == nil {
-			if tid, ok := t["taskId"].(string); ok {
-				tasksMap[tid] = t
+		
+		scanner := bufio.NewScanner(file)
+		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "" {
+				continue
+			}
+			var t map[string]interface{}
+			if json.Unmarshal([]byte(line), &t) == nil {
+				if tid, ok := t["taskId"].(string); ok {
+					tasksMap[tid] = t
+				}
 			}
 		}
+		file.Close()
 	}
 	return tasksMap
 }
+
+func readDedupedTasks(tasksPath string) map[string]map[string]interface{} {
+	return readDedupedTasksMultiple([]string{tasksPath})
+}
+
+
 
 // zeroTime is how Go serializes a zero-value time.Time; treat it as absent.
 const zeroTime = "0001-01-01T00:00:00Z"
@@ -183,6 +191,112 @@ func (q *AnyQueue) StartDashboard(port int) {
 		w.Header().Set("Content-Type", "application/json")
 
 		tasksMap := readDedupedTasks(tasksPath)
+		res := make([]map[string]interface{}, 0, len(tasksMap))
+		for _, t := range tasksMap {
+			rtCount, _ := t["retryCount"].(float64)
+			maxRt, _ := t["maxRetries"].(float64)
+			rtAfter, _ := t["retryAfterTime"].(string)
+
+			res = append(res, map[string]interface{}{
+				"id":                  t["taskId"],
+				"type":                t["taskType"],
+				"status":              dashboardStatus(t),
+				"progress":            0,
+				"retryCount":          rtCount,
+				"maxRetries":          maxRt,
+				"retryAfterTime":      rtAfter,
+				"cronExpression":      t["cronExpression"],
+				"webhookUrl":          t["webhookUrl"],
+				"maxExecutionSeconds": t["maxExecutionSeconds"],
+			})
+		}
+		json.NewEncoder(w).Encode(res)
+	})
+
+	mux.HandleFunc("/api/progress", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ring.latest(100))
+	})
+
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		data, err := os.ReadFile("static/index.html")
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, "Dashboard UI not found: place the dashboard bundle at ./static/index.html")
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.Write(data)
+	})
+
+	fmt.Printf("[Snerd] Dashboard running on http://localhost:%d\n", port)
+	go func() {
+		if err := http.ListenAndServe(fmt.Sprintf(":%d", port), mux); err != nil {
+			fmt.Printf("[Snerd] Dashboard server error: %v\n", err)
+		}
+	}()
+}
+
+func (sq *ShardedQueue) StartDashboard(port int) {
+	ring := &progressRing{cap: 500}
+
+	sub := sq.SubscribeProgress()
+	go func() {
+		for chunk := range sub {
+			var ev struct {
+				TaskID string `json:"task_id"`
+				Data   string `json:"data"`
+			}
+			if json.Unmarshal([]byte(chunk), &ev) != nil {
+				continue
+			}
+			ring.append(dashboardProgressEvent{
+				Ts:     float64(time.Now().UnixNano()) / float64(time.Second),
+				TaskID: ev.TaskID,
+				Data:   ev.Data,
+			})
+		}
+	}()
+
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/api/stats", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+
+		var paths []string
+		for _, q := range sq.GetShards() {
+			paths = append(paths, q.tasksLogPath())
+		}
+		tasksMap := readDedupedTasksMultiple(paths)
+		enqueued, processed, failed := 0, 0, 0
+		for _, t := range tasksMap {
+			enqueued++
+			if isSetTime(t["deletedAt"]) {
+				if hasJobError(t) {
+					failed++
+				} else {
+					processed++
+				}
+			}
+		}
+		fmt.Fprintf(w, `{"enqueued":%d,"processed":%d,"failed":%d}`, enqueued, processed, failed)
+	})
+
+	mux.HandleFunc("/api/tasks", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+
+		var paths []string
+		for _, q := range sq.GetShards() {
+			paths = append(paths, q.tasksLogPath())
+		}
+		tasksMap := readDedupedTasksMultiple(paths)
 		res := make([]map[string]interface{}, 0, len(tasksMap))
 		for _, t := range tasksMap {
 			rtCount, _ := t["retryCount"].(float64)
