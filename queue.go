@@ -333,6 +333,12 @@ func (q *AnyQueue) EnqueueSnerdTask(task *SnerdTask) error {
 		q.hashMu.Unlock()
 	}
 
+	if len(task.TriggerAfterIds) > 0 && q.fileStore != nil {
+		if err := q.fileStore.DetectCycle(task.TaskID, task.TriggerAfterIds); err != nil {
+			return fmt.Errorf("cycle detected: %w", err)
+		}
+	}
+
 	// Convert the SnerdTask to a RetryableTask for storage
 	zeroTime := time.Time{}
 	task.DeletedAt = &zeroTime
@@ -382,17 +388,27 @@ func (q *AnyQueue) ProcessDueTasks() {
 		return
 	}
 
-	// No need to filter here, ReadDueTasks already returns only due tasks
-	if len(tasks) == 0 {
-		fmt.Println("No due tasks found")
+	// Filter tasks based on dependencies
+	var runnableTasks []*RetryableTask
+	for _, t := range tasks {
+		if len(t.TriggerAfterIds) > 0 {
+			if !q.fileStore.AreTasksCompleted(t.TriggerAfterIds) {
+				continue
+			}
+		}
+		runnableTasks = append(runnableTasks, t)
+	}
+
+	if len(runnableTasks) == 0 {
+		fmt.Println("No runnable tasks found (some may be blocked by dependencies)")
 		return
 	}
 
-	fmt.Printf("Found %d due tasks\n", len(tasks))
+	fmt.Printf("Found %d runnable tasks\n", len(runnableTasks))
 
 	// Step 2: Group tasks by pool
 	tasksByPool := make(map[string][]*RetryableTask)
-	for _, t := range tasks {
+	for _, t := range runnableTasks {
 		poolName := "default"
 		if t.Pool != nil && *t.Pool != "" {
 			poolName = *t.Pool
@@ -600,6 +616,29 @@ func (q *AnyQueue) ProcessDueTasks() {
 							fmt.Printf("Warning: Cannot update task %s - no file store available\n", snerdTask.GetTaskID())
 						}
 					} else {
+						// --- Option A: Mark children as failed ---
+						if q.fileStore != nil {
+							if allActive, err := q.fileStore.ReadTasks(); err == nil {
+								for _, child := range allActive {
+									if len(child.TriggerAfterIds) > 0 {
+										isDependent := false
+										for _, depId := range child.TriggerAfterIds {
+											if depId == snerdTask.GetTaskID() {
+												isDependent = true
+												break
+											}
+										}
+										if isDependent && (child.DeletedAt == nil || child.DeletedAt.IsZero()) {
+											failErr := fmt.Errorf("blocked_by_failed_parent: %s", snerdTask.GetTaskID())
+											q.fileStore.UpdateTaskRetryConfig(child.TaskID, failErr)
+											q.fileStore.DeleteTask(child.TaskID)
+										}
+									}
+								}
+							}
+						}
+						// ------------------------------------------
+
 						// Max retries reached - execute the task's OnMaxRetryReached method if implemented
 						fmt.Printf("Task %s reached max retries (%d)\n", snerdTask.GetTaskID(), snerdTask.MaxRetries)
 						// Create a context provider function that returns the error

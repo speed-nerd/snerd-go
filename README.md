@@ -1,6 +1,6 @@
 <div align="center">
   <img src="./assets/Designer-9.png" height="120" alt="Snerd-Go Logo" />
-  <h1>⚙️ snerd-go v0.2.5</h1>
+  <h1>⚙️ snerd-go v0.3.0</h1>
   <p>A blazingly fast, brutally simple, zero-infrastructure embedded background job engine for Go.</p>
 
   [![Go Reference](https://pkg.go.dev/badge/github.com/speed-nerd/snerd-go.svg)](https://pkg.go.dev/github.com/speed-nerd/snerd-go)
@@ -26,6 +26,9 @@ No databases. No external daemons. No nonsense.
 * **Cron, Webhooks & Hard Timeouts**: Recurring schedules, serverless HTTP execution, and per-task execution timeouts.
 * **Progress Streaming**: Handlers can emit live progress events that stream straight into the dashboard.
 * **Dead-Letter Queue (DLQ)**: Built-in `maxRetries` limits and hooks to elegantly catch and bury poison-pill tasks.
+* **Sharded Queues**: Distribute load across multiple queue nodes safely using file-backed lock sharding (`snerd.NewShardedQueue`).
+* **Worker Pools**: Prevent slow tasks from starving fast tasks by dedicating workers to specific pools (`snerd.NewAnyQueueWithPools`).
+* **Job Chaining**: Sequence tasks as DAGs using `triggerAfterIds`.
 
 ---
 
@@ -103,6 +106,8 @@ maxPerMinute := 50
 autoDedupe := true
 urgencyScore := 0.95
 cronStr := "1h"
+pool := "urgent"
+triggerAfterIds := []string{"parent-job-123"}
 
 task, _ := snerd.NewSnerdTaskAdvanced(
 	"unique-task-id-123",  // Unique task ID
@@ -118,6 +123,8 @@ task, _ := snerd.NewSnerdTaskAdvanced(
 	&cronStr,              // Cron — recurring job, runs every 1 hour
 	nil,                   // webhookUrl — HTTP execution instead of a local handler
 	nil,                   // maxExecutionSeconds — hard timeout
+	&pool,                 // pool — Dedicate this task to a specific worker pool
+	triggerAfterIds,       // triggerAfterIds — Wait for other tasks to successfully complete
 )
 queue.EnqueueSnerdTask(task)
 ```
@@ -134,6 +141,8 @@ queue.EnqueueSnerdTask(task)
 | `cron` | `*string` | `nil` | A cron expression for recurring jobs: standard 5-field (`"0 * * * *"`), 6-field with seconds (`"*/10 * * * * *"`), or shorthands `"30s"`, `"10m"`, `"2h"`, `"1d"`. |
 | `webhookUrl` | `*string` | `nil` | Optional webhook URL — the payload is dispatched via HTTP POST instead of a local handler. |
 | `maxExecutionSeconds` | `*int` | `nil` | Optional hard timeout in seconds (see below). |
+| `pool` | `*string` | `nil` | Dedicate this task to a specific worker pool (e.g. `"urgent"`). Use `NewAnyQueueWithPools` to allocate workers per pool. |
+| `triggerAfterIds` | `[]string` | `nil` | Wait for other tasks (by `task_id`) to successfully complete before executing this task. |
 
 ### ⏱️ Note on Hard Timeouts (`maxExecutionSeconds`)
 When `maxExecutionSeconds` is provided, the engine executes your handler with a `context.WithTimeout`. If the task takes longer than the timeout, the context is cancelled. **If your handler respects context cancellation** (select on `ctx.Done()`), it will terminate early and the execution is marked as failed and retried:
@@ -326,6 +335,8 @@ A shared network drive (AWS EFS or NFS) is still a good home for that log when a
 |---|---|
 | `snerd.NewAnyQueue(args ...interface{})` | Create a queue. Variadic options: `string` = name (default `"default-queue"`), `int` = max size (default `100`), `time.Duration` = processor poll interval (default `10s`). Persists to `.snerdata/tasks/tasks.log`. Panics if another queue instance already owns that file. |
 | `snerd.NewAnyQueueWithStorage(name, maxSize, interval, storePath)` | Create a queue with an explicit task log file location instead of the default `.snerdata/tasks/tasks.log`. Panics if another queue instance already owns that file. |
+| `snerd.NewAnyQueueWithPools(...)` | Create a queue that natively isolates concurrent executions by providing a map of pool names to max worker counts. |
+| `snerd.NewShardedQueue(...)` | Create a clustered, multi-node queue that automatically shards the `.snerdata` file locks so you can run multiple concurrent processes safely on the same storage directory. |
 | `queue.EnqueueSnerdTask(task)` / `queue.Enqueue(task)` | Enqueue a task. Due tasks execute immediately in background goroutines; the rest are picked up by the processor loop. |
 | `snerd.RegisterTaskHandler(type, handler)` | Register `func(ctx context.Context, parameters string) error` for a task type. |
 | `snerd.RegisterMaxRetryHandler(type, handler)` | Register the Dead-Letter handler for a task type. |

@@ -138,6 +138,7 @@ type SnerdTask struct {
 	WebhookUrl          *string   `json:"webhookUrl,omitempty"`
 	MaxExecutionSeconds *int      `json:"maxExecutionSeconds,omitempty"`
 	Pool                *string   `json:"pool,omitempty"`
+	TriggerAfterIds     []string  `json:"triggerAfterIds,omitempty"`
 
 	// Timestamps for record-keeping
 	CreatedAt time.Time  `json:"-"`                   // When the task was created
@@ -380,6 +381,7 @@ func (t *SnerdTask) ToRetryableTask() *RetryableTask {
 		WebhookUrl:          t.WebhookUrl,
 		MaxExecutionSeconds: t.MaxExecutionSeconds,
 		Pool:                t.Pool,
+		TriggerAfterIds:     t.TriggerAfterIds,
 		EmbeddedTask:        t,
 		DeletedAt:           t.DeletedAt,
 		CreatedAt:           t.CreatedAt,
@@ -416,6 +418,7 @@ func FromRetryableTask(rt *RetryableTask) *SnerdTask {
 		WebhookUrl:          rt.WebhookUrl,
 		MaxExecutionSeconds: rt.MaxExecutionSeconds,
 		Pool:                rt.Pool,
+		TriggerAfterIds:     rt.TriggerAfterIds,
 		CreatedAt:           rt.CreatedAt,
 		UpdatedAt:           rt.UpdatedAt,
 		DeletedAt:           rt.DeletedAt,

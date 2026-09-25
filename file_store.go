@@ -220,6 +220,48 @@ func (fs *FileStore) GetLatestTask(taskID string) (*RetryableTask, error) {
 	return nil, fmt.Errorf("task with ID %s not found", taskID)
 }
 
+func (fs *FileStore) AreTasksCompleted(taskIDs []string) bool {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	for _, id := range taskIDs {
+		if _, exists := fs.tasksCache[id]; exists {
+			return false
+		}
+	}
+	return true
+}
+
+func (fs *FileStore) DetectCycle(newTaskID string, triggerAfterIds []string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	visited := make(map[string]bool)
+	stack := make([]string, len(triggerAfterIds))
+	copy(stack, triggerAfterIds)
+
+	for len(stack) > 0 {
+		currentID := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		if currentID == newTaskID {
+			return fmt.Errorf("cycle detected involving task %s", newTaskID)
+		}
+
+		if visited[currentID] {
+			continue
+		}
+		visited[currentID] = true
+
+		if task, exists := fs.tasksCache[currentID]; exists {
+			if len(task.TriggerAfterIds) > 0 {
+				stack = append(stack, task.TriggerAfterIds...)
+			}
+		}
+	}
+	return nil
+}
+
 func (fs *FileStore) DeleteTask(taskID string) error {
 	fs.mu.Lock()
 

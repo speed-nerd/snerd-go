@@ -41,6 +41,7 @@ type RetryableTask struct {
 	WebhookUrl          *string    `json:"webhookUrl,omitempty"`
 	MaxExecutionSeconds *int       `json:"maxExecutionSeconds,omitempty"`
 	Pool                *string    `json:"pool,omitempty"`
+	TriggerAfterIds     []string   `json:"triggerAfterIds,omitempty"`
 	CreatedAt           time.Time  `json:"-"`
 	UpdatedAt           time.Time  `json:"-"`
 	DeletedAt           *time.Time `json:"deletedAt,omitempty"`
@@ -110,6 +111,7 @@ func (t *RetryableTask) MarshalJSON() ([]byte, error) {
 		WebhookUrl          *string         `json:"webhookUrl,omitempty"`
 		MaxExecutionSeconds *int            `json:"maxExecutionSeconds,omitempty"`
 		Pool                *string         `json:"pool,omitempty"`
+		TriggerAfterIds     []string        `json:"triggerAfterIds,omitempty"`
 		LastErrorObj        string          `json:"lastErrorObj,omitempty"`
 		LastJobError        *JobErrorReturn `json:"lastJobError,omitempty"`
 		DeletedAt           *time.Time      `json:"deletedAt,omitempty"`
@@ -146,6 +148,7 @@ func (t *RetryableTask) MarshalJSON() ([]byte, error) {
 		WebhookUrl:          t.WebhookUrl,
 		MaxExecutionSeconds: t.MaxExecutionSeconds,
 		Pool:                t.Pool,
+		TriggerAfterIds:     t.TriggerAfterIds,
 		LastErrorObj:        errStr,
 		LastJobError:        t.LastJobError,
 		DeletedAt:           t.DeletedAt,
@@ -174,6 +177,7 @@ func (t *RetryableTask) UnmarshalJSON(data []byte) error {
 		WebhookUrl          *string         `json:"webhookUrl,omitempty"`
 		MaxExecutionSeconds *int            `json:"maxExecutionSeconds,omitempty"`
 		Pool                *string         `json:"pool,omitempty"`
+		TriggerAfterIds     []string        `json:"triggerAfterIds,omitempty"`
 		DeletedAt           *time.Time      `json:"deletedAt,omitempty"`
 	}
 
@@ -200,6 +204,7 @@ func (t *RetryableTask) UnmarshalJSON(data []byte) error {
 	t.WebhookUrl = alias.WebhookUrl
 	t.MaxExecutionSeconds = alias.MaxExecutionSeconds
 	t.Pool = alias.Pool
+	t.TriggerAfterIds = alias.TriggerAfterIds
 	t.DeletedAt = alias.DeletedAt
 
 	// We'll reconstruct the EmbeddedTask when Execute is called, not here
