@@ -7,6 +7,8 @@
   [![Docs](https://img.shields.io/badge/docs-speed--nerd.github.io-blue)](https://speed-nerd.github.io/docs/)
 </div>
 
+> 📝 **What's New in v0.3.0?** Check out the [Changelog & Releases](https://speed-nerd.github.io/docs/changelog) for the latest features including Sharded Queues, Worker Pools, and Job Chaining!
+
 If you are tired of wrestling with heavy, bloated background job frameworks like Redis, Postgres tables, or RabbitMQ just to send a few emails in the background... well, you are in the right place.
 
 `snerd-go` is an embedded, high-performance background task queue that lives entirely in a single, perfectly OS-locked, append-only `.log` file on your file system. It was designed to bring aggressive concurrency and a lightweight footprint to your Go microservices.
@@ -326,6 +328,50 @@ queue := snerd.NewAnyQueueWithStorage("worker-server-1", 10, 2*time.Second, "/va
 ```
 
 A shared network drive (AWS EFS or NFS) is still a good home for that log when a single instance needs durable storage — e.g. a container that restarts but must keep its queue state. OS-level file locking keeps writes safe — no Redis required.
+
+### 🍕 Embedded Sharding (Multi-Process Scaling)
+
+If you have multiple instances of your Go app running on the **same machine** (e.g., behind a local load balancer) and you want them to share the processing load, you can use the built-in **Sharded Queue**. This transparently partitions tasks across multiple `.log` files and coordinates lease-based ownership via a background heartbeat.
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    snerd "github.com/speed-nerd/snerd-go"
+)
+
+func main() {
+    // 1. Create a Sharded Queue requesting 4 partitions
+    sharded, err := snerd.NewShardedQueue("main", "./.snerdata", 4)
+    if err != nil {
+        panic(err)
+    }
+    
+    // 2. Register handlers globally (they replicate to all shards)
+    snerd.RegisterTaskHandler("process_image", func(ctx context.Context, data string) error {
+        fmt.Println("Processing:", data)
+        return nil
+    })
+    
+    // 3. Enqueue tasks (they are hashed to a specific shard automatically)
+    task := snerd.NewSnerdTask("id-1", "process_image", "{}", 3, 1.0, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+    sharded.Enqueue(task)
+    
+    // 4. Start the dashboard (it aggregates all owned shards!)
+    sharded.StartDashboard(9090)
+
+    // 5. Gracefully shutdown and release the OS file locks on exit
+    defer sharded.Shutdown()
+    
+    select {} // keep alive
+}
+```
+
+> **Note:** We strongly recommend keeping sharded processes on a single physical machine with a local disk. Using embedded sharding across NFS/EFS is not officially supported due to clock drift and unreliable `flock` implementations over network mounts.
+
+> **Concurrency Limits:** `ShardedQueue` automatically uses a **Shared Worker Pool**. If you request 10 shards, the engine will still strictly enforce your maximum concurrency limits (default: 100 concurrent workers) process-wide, dynamically shifting workers to whichever shard has due tasks.
 
 ---
 

@@ -1,6 +1,7 @@
 package snerd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,6 +19,9 @@ type ShardedQueue struct {
 	shardsMu     sync.RWMutex
 	progressSubs []chan string
 	progressMu   sync.Mutex
+	cancelFn     context.CancelFunc
+	ctx          context.Context
+	workerPools  map[string]chan struct{}
 }
 
 func NewShardedQueue(name, dirPath string, requestedShards int) (*ShardedQueue, error) {
@@ -30,11 +34,19 @@ func NewShardedQueue(name, dirPath string, requestedShards int) (*ShardedQueue, 
 		return nil, fmt.Errorf("Failed to resolve sharding layout: %w", err)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
+	workerPools := make(map[string]chan struct{})
+	workerPools["default"] = make(chan struct{}, 100)
+
 	sq := &ShardedQueue{
 		Name:             name,
 		Dir:              dirPath,
 		shards:           make(map[string]*AnyQueue),
 		progressSubs:     make([]chan string, 0),
+		ctx:              ctx,
+		cancelFn:         cancel,
+		workerPools:      workerPools,
 	}
 
 	go sq.startMembershipHeartbeat(totalShards)
@@ -113,7 +125,12 @@ func (sq *ShardedQueue) startMembershipHeartbeat(totalShards int) {
 		}
 
 		sq.reconcileShards(currentOwned)
-		time.Sleep(RenewIntervalSecs * time.Second)
+
+		select {
+		case <-sq.ctx.Done():
+			return
+		case <-time.After(RenewIntervalSecs * time.Second):
+		}
 	}
 }
 
@@ -130,7 +147,7 @@ func (sq *ShardedQueue) instantiateShard(shard string, lock *flock.Flock) {
 	os.MkdirAll(filepath.Dir(logPath), 0755)
 
 	lock.Unlock() // Let AnyQueue take the lock.
-	q := NewAnyQueueWithStorage(sq.Name, 100, 1*time.Second, logPath)
+	q := NewAnyQueueWithSharedPools(sq.Name, 100, 1*time.Second, logPath, sq.workerPools)
 
 	ch := q.SubscribeProgress()
 	go func() {
@@ -167,5 +184,18 @@ func (sq *ShardedQueue) reconcileShards(currentOwned []string) {
 			delete(sq.shards, shard)
 			fmt.Printf("[Snerd] Lost lease for %s, stopped engine.\n", shard)
 		}
+	}
+}
+
+func (sq *ShardedQueue) Shutdown() {
+	sq.cancelFn() // Stop the heartbeat loop
+
+	sq.shardsMu.Lock()
+	defer sq.shardsMu.Unlock()
+
+	for shard, q := range sq.shards {
+		q.StopProcessor()
+		delete(sq.shards, shard)
+		fmt.Printf("[Snerd] Shutdown: released %s\n", shard)
 	}
 }

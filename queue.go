@@ -149,6 +149,23 @@ func NewAnyQueueWithPoolsAndStorage(name string, maxSize int, processingInterval
 }
 
 func newAnyQueueAdvanced(name string, maxSize int, taskStorePath string, processingInterval time.Duration, poolConfig map[string]int) *AnyQueue {
+	workerPools := make(map[string]chan struct{})
+	hasDefault := false
+	for poolName, capacity := range poolConfig {
+		workerPools[poolName] = make(chan struct{}, capacity)
+		if poolName == "default" {
+			hasDefault = true
+		}
+	}
+	if !hasDefault {
+		workerPools["default"] = make(chan struct{}, 100)
+	}
+	return NewAnyQueueWithSharedPools(name, maxSize, processingInterval, taskStorePath, workerPools)
+}
+
+// NewAnyQueueWithSharedPools creates a new queue that uses a pre-allocated map of worker pools.
+// This is used by ShardedQueue to ensure total concurrency is strictly bound across all shards.
+func NewAnyQueueWithSharedPools(name string, maxSize int, processingInterval time.Duration, taskStorePath string, workerPools map[string]chan struct{}) *AnyQueue {
 	// Acquire exclusive ownership of the task log before anything else. Two
 	// processors on the same file would race and double-execute tasks, so a
 	// second queue on the same storage fails fast instead. The OS releases the
@@ -202,18 +219,7 @@ func newAnyQueueAdvanced(name string, maxSize int, taskStorePath string, process
 		}
 	}
 
-	// Initialize worker pools
-	workerPools := make(map[string]chan struct{})
-	hasDefault := false
-	for poolName, capacity := range poolConfig {
-		workerPools[poolName] = make(chan struct{}, capacity)
-		if poolName == "default" {
-			hasDefault = true
-		}
-	}
-	if !hasDefault {
-		workerPools["default"] = make(chan struct{}, 100)
-	}
+
 
 	// Create the queue with the specified parameters
 	q := &AnyQueue{
@@ -562,9 +568,9 @@ func (q *AnyQueue) ProcessDueTasks() {
 				var ctx context.Context
 				var cancel context.CancelFunc
 				if snerdTask.MaxExecutionSeconds != nil {
-					ctx, cancel = context.WithTimeout(context.Background(), time.Duration(*snerdTask.MaxExecutionSeconds)*time.Second)
+					ctx, cancel = context.WithTimeout(q.processorCtx, time.Duration(*snerdTask.MaxExecutionSeconds)*time.Second)
 				} else {
-					ctx, cancel = context.WithCancel(context.Background())
+					ctx, cancel = context.WithCancel(q.processorCtx)
 				}
 				defer cancel()
 
