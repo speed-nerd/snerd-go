@@ -409,3 +409,106 @@ If your file ever grows too large, `snerd-go` atomically clones, shrinks, and re
 ## 🤝 License
 
 MIT License. Do whatever you want with it, just don't let your tasks die unhandled.
+
+
+## Advanced Orchestration (v0.3.0 Features)
+
+SnerdMQ v0.3.0 introduced powerful new primitives for managing complex background jobs natively in the core engine. Below are examples of how to utilize these features when embedding SnerdMQ in Go:
+
+### 🍕 Sharded Queues (Scaling Out)
+
+SnerdMQ natively supports distributed execution across multiple servers while acting as a single logical queue. Just mount a shared storage drive (like AWS EFS) and boot multiple daemons. They will automatically lock and negotiate ownership of shards. Just tell the queue how many shards to claim on boot.
+
+```go
+// Boot a multi-tenant daemon that owns up to 4 shards locally
+queue, err := snerd.NewShardedQueue("my-queue", "/var/data/snerd", 4)
+```
+
+### 🏊 Worker Pools
+
+```go
+// Route an AI task to a dedicated pool
+aiPool := "ai-pool"
+aiTask := &snerd.SnerdTask{
+    TaskID: "ai-1",
+    TaskType: "ai_generation",
+    Parameters: `{"prompt":"horse"}`,
+    Pool: &aiPool,
+}
+queue.EnqueueSnerdTask(aiTask)
+
+// Route an email task to a fast, urgent pool
+urgentPool := "urgent"
+emailTask := &snerd.SnerdTask{
+    TaskID: "email-1",
+    TaskType: "send_email",
+    Parameters: `{"to":"user@a.com"}`,
+    Pool: &urgentPool,
+}
+queue.EnqueueSnerdTask(emailTask)
+```
+
+### 🔗 Job Chaining (DAGs)
+
+```go
+// Step 1: Transcode
+queue.EnqueueSnerdTask(&snerd.SnerdTask{
+    TaskID: "transcode-1",
+    TaskType: "transcode_video",
+    Parameters: `{"file":"raw.mp4"}`,
+})
+
+// Step 2: Upload (Waits for Step 1)
+nextTask := &snerd.SnerdTask{
+    TaskID: "upload-1",
+    TaskType: "upload_s3",
+    Parameters: `{"file":"out.mp4"}`,
+    TriggerAfterIds: []string{"transcode-1"},
+}
+queue.EnqueueSnerdTask(nextTask)
+```
+
+### 🕒 Cron & Scheduled Jobs
+
+```go
+// Run every day at 08:00
+cronExpr := "0 8 * * *"
+cronTask := &snerd.SnerdTask{
+    TaskID: "digest",
+    TaskType: "email",
+    Parameters: `{}`,
+    CronExpr: &cronExpr,
+}
+queue.EnqueueSnerdTask(cronTask)
+```
+
+### 🛑 Hard Timeouts
+
+```go
+// Forcefully kill if running > 5 mins
+timeout := 300
+riskyTask := &snerd.SnerdTask{
+    TaskID: "risky",
+    TaskType: "fetch",
+    Parameters: `{}`,
+    MaxExecutionSeconds: &timeout,
+}
+queue.EnqueueSnerdTask(riskyTask)
+```
+
+### 🌐 Webhook Callbacks
+
+```go
+// Execute via HTTP instead of local handlers
+webhook := "https://api.example.com/webhook"
+hookTask := &snerd.SnerdTask{
+    TaskID: "serverless",
+    TaskType: "resize",
+    Parameters: `{}`,
+    WebhookUrl: &webhook,
+}
+queue.EnqueueSnerdTask(hookTask)
+```
+
+*Built with ❤️ for John Wick tier engineering.*
+
